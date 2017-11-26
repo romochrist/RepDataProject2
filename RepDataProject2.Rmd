@@ -1,0 +1,353 @@
+---
+title: "Weather events with the greatest impact on public health and economics in the U.S."
+author: "Christian Romo"
+date: "25/11/2017"
+output: 
+    html_document:
+        keep_md: true
+---
+
+# Synopsis
+
+Nowadays humanity has a better understanding and even being able to predict meteorological events, but 
+weather is still powerful force we have keep an eye on. Tornadoes and hurricanes are two examples of 
+severe weather capable of causing loss of life and major damage. Snowstorms trap people in their homes 
+or businesses, forcing them to wait out and paralyzing entire cities. Even severe rain can have a major 
+effect on society through transportation delays.
+
+This document explores the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database
+to find out what weather events have the greatest impact on population and economics.
+
+All the code and data is available [here.](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2)
+
+# Data Processing
+
+#### Loading required libraries
+
+```{r libraries, results = "hide", echo = TRUE}
+    require(dplyr)
+    require(lubridate)
+    require(stringr)
+    require(stringdist)
+    require(ggplot2)
+    require(cowplot)
+    require(xtable)
+```
+
+#### Data reading
+
+Data can be dowloaded from [here.](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2)
+
+Reading the file with all the storm information, also reading a file that contains the names for
+the 48 types of events.
+```{r dataReading, cache = TRUE, results = "hide", echo = TRUE}
+    stormData <- read.csv(file = "repdata_StormData.csv.bz2")
+    eventTypes <- read.csv("EventTypes.csv", col.names = c("event"), header = FALSE)
+```
+
+#### Data cleaning
+
+Removing unnecesary columns. 
+```{r dataCleaningA, cache = TRUE, results = "hide", echo = TRUE}
+    stormData <- stormData[, c("BGN_DATE", "EVTYPE", "FATALITIES", "INJURIES", 
+                               "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP")]
+```
+
+Selecting columns with relevant data about damage, fatalities or injuries. 
+```{r dataCleaningB, cache = TRUE, results = "hide", echo = TRUE}
+    stormData <- stormData[stormData$FATALITIES > 0 | stormData$INJURIES > 0 
+                           | stormData$PROPDMG > 0 | stormData$CROPDMG > 0, ]
+```
+
+Analyzing event types recorded by year.
+```{r dataCleaningC, cache = TRUE, results = "hide", echo = TRUE}
+    stormData$YEAR <- year(as.Date(as.character(stormData$BGN_DATE), format = "%m/%d/%Y"))
+    byYearData <- group_by(stormData, YEAR) %>% summarise(EVENTSNUM = length(unique(EVTYPE)))
+```
+
+Even when the EVTYPE column is not normalized, we can see that the most of the types of events began
+being recorded from 1993.
+```{r dataCleaningD, cache = TRUE, results = "asis", echo = TRUE}
+    # Year with at least 48 diferent type of events recorded
+    xTable <- xtable(byYearData[byYearData$EVENTSNUM >= 48, ])
+    print(xTable, type = "html")
+    
+    # Data recorded before 1993
+    xTable2 <- xtable(byYearData[byYearData$YEAR <= 1993, ])
+    print(xTable2, type = "html")
+```
+
+As we need the most of the types of events for a true comparison, we'll only be analyzing data 
+from 1993.
+```{r dataCleaningE, cache = TRUE, results = "asis", echo = TRUE}
+    # Also removing unnnecesary columns
+    stormData <- stormData[stormData$YEAR >= 1993 , c("EVTYPE", "FATALITIES", "INJURIES", 
+                               "PROPDMG", "PROPDMGEXP", "CROPDMG", "CROPDMGEXP")]
+```
+
+Normalizing EVTYPE data.
+```{r dataCleaningF, cache = TRUE, results = "hide", echo = TRUE}
+    # Removing whitespaces and transforming text to upper case
+    stormData$EVTYPE <- toupper(trimws(stormData$EVTYPE))
+    # Removing empty events
+    stormData <- stormData[stormData$EVTYPE != "?", ]
+    # Removing all SUMMARY events
+    stormData <- stormData[!grepl("SUMMARY|MONTHLY|MONTH|YEAR|MAY|OTHER", x = stormData$EVTYPE), ]
+    # Removing numbers and other unnecesary chars
+    stormData$EVTYPE <- str_replace_all(stormData$EVTYPE, "[0123456789().]", "")
+    # Removing extra whitespaces
+    stormData$EVTYPE <- gsub("\\s\\s", " ", stormData$EVTYPE)
+    # Removing unnecesary words
+    removeWords <- c("SEVERE|RECORD|PATCHY|GUSTY|FIRST|LATE|UNSEASONABLY|SEASON|NON|ABNORMALLY",
+                        "|ROGUE|FALLING|PROLONGED|ACCUMULATED|PROLONG|UNUSUALLY|ROUGH|LOCALLY|UNUSUAL",
+                        "|ABNORMAL|MOUNTAIN|METRO|RAPIDLY|LACK|LARGE|MAJOR|MPH|DAMAGE|LOW|EARLY",
+                        "|MODERATE|BITTER|MIXED|LOCAL|RURAL|GRADIENT|STREAM|NEAR|BING|SHOWERS|MINOR",
+                        "|WAVE|NORMAL|AGRICULTURAL|SML|STREET|SHOWER|PLUME|SAHARAN|AIR|RIVER|OPAL",
+                        "|DRY|PATTERN|ACCUMULATION|MIX|CONDITIONS|GENERATED|SWELLS|TEMPREATURES",
+                        "|TEMPERATURE|TEMPS|TEMP|BREAKUP|WET|SQUALLS|ALOFT|ADVISORY|DRIFTING",
+                        "|SNOWMELT|HIGHWAY|ROTATING|INJURY|JAM|GROUND|ADVISORIES|SMALL")
+    stormData$EVTYPE <- gsub(removeWords, "", stormData$EVTYPE)
+    stormData$EVTYPE <- trimws(stormData$EVTYPE)
+    # Fixing typos, abbreviations and synonyms
+    stormData$EVTYPE <- gsub("TSTM|THUNERSTORM|THUNDERSTROM|THUNDERSTORMS|THUNDERSTORMW|THUNDERTORM|RAINSTORM|STORM FORCE",
+                             "THUNDERSTORM", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("FLOODING|FLD|FLDG|FLOODIN|RISING WATER", "FLOOD", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("TORNADOES|TORNDAO|TORNADOS", "TORNADO", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("WND|WINDS", "WIND", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("CSTL|TIDAL", "COASTAL", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("RAINFALL|PRECIPITATION|PRECIPATATION|PRECIP", "RAIN", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("HVY|TORRENTIAL", "HEAVY", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("AVALANCE", "AVALANCHE", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("SURFING", "SURF", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("TYPHOON", "HURRICANE", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("DEVEL", "DEVIL", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("DUSTSTORM|DUST STORM", "DUST DEVIL", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("ERUPTION|ASHFALL", "ASH", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("HOT|WARMTH|WARM|HEAT SPELL|SPELL", "HEAT", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("LIGNTNING", "LIGHTNING", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("EXTENDED", "EXTREME", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("SNOWPACK|SNOWSTORM|SNOWFALL", "SNOW", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("WINTERY", "WINTER", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("ICESTORM", "ICE STORM", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("WHIRLWIND", "STRONG WIND", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("BRUSH FIRES", "WILDFIRE", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("WALL", "FUNNEL", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("WATER SPOUT|WAYTERSPOUT", "WATERSPOUT", stormData$EVTYPE)
+    # Replacing chars and extra whitespaces for / when needed
+    stormData$EVTYPE <- gsub(";\\s|\\s;|AND|\\sAND\\s|\\s\\s/|\\s/|/\\s\\s|/\\s|\\s&\\s|\\s&|,\\s|\\\\", 
+                             "/", stormData$EVTYPE)
+    stormData$EVTYPE <- trimws(stormData$EVTYPE)
+    # Removing extra whitespaces
+    stormData$EVTYPE <- gsub("\\s/|^-\\s|^-|/$|^/|-$|;$", "", stormData$EVTYPE)
+    # Removing single chars left after replacing
+    stormData$EVTYPE <- gsub("\\s[A-Z]{1}$|^[A-Z]{1}\\s", "", stormData$EVTYPE)
+    stormData$EVTYPE <- gsub("\\s\\s", " ", stormData$EVTYPE)
+    # Removing empty events left after cleaning
+    stormData <- stormData[stormData$EVTYPE != "", ]
+```
+
+Calculating the number of unique type of events.
+```{r dataCleaningG, cache = TRUE, results = "hide", echo = TRUE}
+    numEvents <- length(unique(stormData$EVTYPE))
+```
+After cleaning event names there are `r numEvents ` diferent types of events.
+
+
+Function for matching the event names with the official types of events.
+```{r matchEventType, echo = TRUE}
+    matchEventType <- function(event) {
+        match <- 0
+        newEvent <- ""
+        # Matching text with amatch function
+        match <- amatch(event, eventTypes$event, maxDist = 10, nomatch = 0)
+            if(match > 0) {
+                newEvent <- eventTypes[match, "event"]
+            } else {
+                newEvent <- event
+                # if no first match, then split string by / when multiple events reported
+                # and take the first matched string
+                # if no match again, then return original event name
+                words <- strsplit(event, "/")[[1]]
+                if(length(words) > 1) {
+                    for(word in words) {
+                        match <- amatch(word, eventTypes$event, maxDist = 10, nomatch = 0)
+                        if(match > 0) {
+                            newEvent <- eventTypes[match, "event"]
+                            break;
+                        } 
+                    }
+                }
+            }
+        as.character(newEvent)
+    }
+```
+
+Matching the event names with the official types of events.
+```{r dataCleaningH, cache = TRUE, results = "asis", echo = TRUE}
+    stormData$EVTYPE <- mapply(matchEventType, stormData$EVTYPE)
+```
+
+Calculating the number of unique type of events.
+```{r dataCleaningI, cache = TRUE, results = "hide", echo = TRUE}
+    numEvents <- length(unique(stormData$EVTYPE))
+```
+After matching event names there are `r numEvents` unique type of events.
+
+Selecting only the rows that match with the official types of events.
+```{r subsettingA, cache = TRUE, results = "asis", echo = TRUE}
+    match <- stormData$EVTYPE %in% eventTypes$event
+    stormData <-  stormData[match, ]
+    noMatch <- length(which(!match))
+```
+Removing `r noMatch` events that couldn't be matched.
+
+The dimensions of the final data to be analized.
+```{r subsettingB, cache = TRUE, results = "asis", echo = TRUE}
+    dim(stormData)
+```
+
+#### Calculating population health damage.
+```{r populationA, cache = TRUE, results = "asis", echo = TRUE}
+    stormData$TOTALPOPDMG <- stormData$FATALITIES + stormData$INJURIES
+```
+
+#### Calculating economic damage.
+
+Function for calculating total economic damage.
+```{r calculateTotalDamage, echo = TRUE}
+    calculateTotalDamage <- function(propDmg, propEx, cropDmg, cropEx) {
+        exp <- c(D = 10, H = 100, K = 1000, M = 1000000, B = 1000000000)
+        totalDmg <- 0
+        totalPropDmg <-  0
+        totalCropDmg <-  0
+        propEx <- as.character(propEx)
+        cropEx <- as.character(cropEx)
+        # calculating property damage
+        if(propDmg > 0 & propEx != "" & propEx != "-" & propEx != "?" & propEx != "+") {
+            propEx <- toupper(propEx)
+            if(propEx >= 0 & propEx <= 8) {
+                propEx <- "D"
+            }
+            totalPropDmg <- propDmg * as.numeric(exp[propEx])
+        }
+        # calculating crop damage
+        if(cropDmg > 0 & cropEx != "" & cropEx != "-" & cropEx != "?" & cropEx != "+") {
+            cropEx <- toupper(cropEx)
+            if(cropEx >= 0 & cropEx <= 8) {
+                cropEx <- "D"
+            }
+            totalCropDmg <- cropDmg * as.numeric(exp[cropEx])
+        }
+        totalDmg <- totalPropDmg + totalCropDmg
+        totalDmg
+    }
+```
+
+Calculating economic damage.
+```{r economicA, cache = TRUE, results = "asis", echo = TRUE}
+    stormData$TOTALECODMG <- mapply(calculateTotalDamage, stormData$PROPDMG, stormData$PROPDMGEXP, 
+                                 stormData$CROPDMG, stormData$CROPDMGEXP)
+```
+
+#### Summary of population damage.
+```{r populationB, cache = TRUE, results = "asis", echo = TRUE}
+    populationDmg <- stormData[ stormData$TOTALPOPDMG > 0, ]
+```
+
+Grouping population damage data by event type and calculating total damage.
+```{r populationC, cache = TRUE, results = "asis", echo = TRUE}
+    populationTotals <- group_by(populationDmg, EVTYPE) %>% summarise(TOTAL = sum(TOTALPOPDMG))
+```
+
+Plotting population damage data.
+```{r populationD, cache = TRUE, results = "asis", echo = TRUE}
+    ggplot(populationTotals , aes(EVTYPE, TOTAL, fill = EVTYPE)) + 
+    geom_bar(stat = "identity") + coord_flip() + 
+    theme(legend.position="none", axis.text.y = element_text(size = 7), 
+          axis.text.x = element_text(size = 7)) + 
+    labs(title = "Total population damage by event type") +
+    labs(x = "Event type", y = "Total fatalities and injuries")
+```
+
+#### Summary of economic damage.
+```{r economicB, cache = TRUE, results = "asis", echo = TRUE}
+    economicDmg <- stormData[ stormData$TOTALECODMG > 0, ]
+```
+
+Grouping economic damage data by event type and calculating total damage (in millions).
+```{r economicC, cache = TRUE, results = "asis", echo = TRUE}
+    economicTotals <- group_by(economicDmg, EVTYPE) %>% summarise(TOTAL = sum(TOTALECODMG))
+    economicTotals$TOTAL <- economicTotals$TOTAL / 1000000
+```
+
+Plotting economic damage data.
+```{r economicD, cache = TRUE, results = "asis", echo = TRUE}
+    ggplot(economicTotals , aes(EVTYPE, TOTAL, fill = EVTYPE)) + 
+    geom_bar(stat = "identity") + coord_flip() + 
+    theme(legend.position="none", axis.text.y = element_text(size = 7), 
+          axis.text.x = element_text(size = 7)) + 
+    labs(title = "Total economic damage by event type") +
+    labs(x = "Event type", y = "Total damage (millions of dollars)")
+```
+
+# Results
+
+#### Ordering data by total damage of each event type.
+
+Ordering population damage data by the most harmful events (Event name, Total fatalities and injuries).
+```{r resultsA, cache = TRUE, results = "asis", echo = TRUE}
+    populationTotals <- populationTotals[order(-populationTotals$TOTAL), ]
+    xTable <- xtable(populationTotals)
+    print(xTable, type = "html")
+```
+There are events with little to no impact on population healt, for the purpouse of this document we will 
+be usign the top five events with the greatest impact on population health.
+
+Ordering economic damage data by events with the greatest economic consequences (Event name, total damage in millions of dollars).
+```{r resultsB, cache = TRUE, results = "asis", echo = TRUE}
+    economicTotals <- economicTotals[order(-economicTotals$TOTAL), ]
+    xTable <- xtable(economicTotals)
+    print(xTable, type = "html")
+```
+There are events with little to no economic damage, for the purpouse of this document we will be usign 
+the top five events with the greatest economic consequences.
+
+
+#### Comparison of the events with greatest population and economic consequences.
+```{r resultsC, cache = TRUE, results = "asis", echo = TRUE}
+    plot1 <- ggplot(head(populationTotals, 5) , aes(x = reorder(EVTYPE, -TOTAL), TOTAL, fill = EVTYPE)) + 
+    geom_bar(stat = "identity") + coord_flip() + 
+    theme(legend.position="none", axis.text.y = element_text(size = 7), 
+          axis.text.x = element_text(size = 7), 
+          plot.title = element_text(size = 8), axis.title = element_text(size = 8)) + 
+    labs(title = "Total population damage by event type") +
+    labs(x = "Event type", y = "Total fatalities and injuries")
+
+    plot2 <- ggplot(head(economicTotals, 5) , aes(x = reorder(EVTYPE, -TOTAL), TOTAL, fill = EVTYPE)) + 
+    geom_bar(stat = "identity") + coord_flip() + 
+    theme(legend.position="none", axis.text.y = element_text(size = 7), 
+          axis.text.x = element_text(size = 7), 
+          plot.title = element_text(size = 8), axis.title = element_text(size = 8)) + 
+    labs(title = "Total economic damage by event type") +
+    labs(x = "Event type", y = "Total damage (millions of dollars)")
+    
+    plot_grid(plot1, plot2)
+```
+
+We can see that the top five events with the greatest impact on population health are:
+
+1. Tornado
+2. Excessive heat
+3. Flood
+4. Thunderstorm wind
+5. Lightning
+
+We can see that the top five events with the greatest economic consequences are:
+
+1. Flood
+2. Hurricane
+3. Storm surge/tide
+4. Tornado
+5. Hail
+
+Even with a better understanding of climate and the capability to predict meteorological events, we have to prepared to react immediatly when the probabilities for this ten events to happen are not in our favor, so we can limit the potential damage, at least in population health.
